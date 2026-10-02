@@ -1,4 +1,8 @@
 checkpoints
 .venv
-data
 __pycache__
+
+# Keep the data/ folder structure (via .gitkeep) but not the transcripts/corpus
+data/**
+!data/**/
+!data/**/.gitkeep

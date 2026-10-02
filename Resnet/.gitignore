@@ -1,4 +1,9 @@
 .venv
 
-data
-models
+# Keep the data/ and models/ folders (via .gitkeep) but not their contents
+data/**
+!data/**/
+!data/**/.gitkeep
+models/**
+!models/**/
+!models/**/.gitkeep
