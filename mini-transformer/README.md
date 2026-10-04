@@ -166,9 +166,19 @@ The model picks up local phrasing and the transcript style ("um", "you know"), b
 
 ## Limitations & next steps
 
-The model is two small transformer blocks trained on under a million words. Improvements, roughly in order of impact:
-- more training data
-- train the BPE model and compare word perplexity with the word-level model
-- spend the parameters BPE frees up on a bigger model (e.g. embedding 128, more blocks), then turn dropout back on
+The model is two small transformer blocks trained on under a million words (40 transcripts).
+
+With the same architecture, BPE is much worse than word-level so far: a word perplexity of 62.3 (first BPE run, best checkpoint at epoch 13) against 15.7. The BPE model has only 367k parameters and doesn't fit the training data well, so it is too small, not overfitting.
+
+Improvements, roughly in order of impact:
+1. **Use the parameters BPE frees up:** embedding 128, 4 blocks, and weight tying (the output layer reuses the token embedding matrix). About 1.05M parameters, close to the word-level model, but almost all of them in the transformer blocks.
+2. **More data:** 200–500 transcripts instead of 40. Add video IDs to `data/raw/videos.txt` and rerun the corpus scripts.
+3. **Better training setup:** AdamW with weight decay 0.1, learning-rate warmup then cosine decay, and gradient clipping at 1.0.
+4. **Shorter epochs:** `create_training_data` starts a window at every token, so each epoch sees every token about 40 times. Starting windows every 8–16 tokens makes epochs 8–16× faster.
+5. **Faster training:** run all heads at once with `F.scaled_dot_product_attention`, and use fp16 mixed precision (`torch.autocast`).
+6. **Once the model is bigger:** context of 64–128 tokens, and dropout 0.1 again.
+7. **Better samples without retraining:** top-k or top-p sampling in `generate()`.
+
+Suggested next run: 1 + 3 together, while collecting more transcripts for 2.
 
 The [`../Transformer`](../Transformer) notebook implements most of these.
