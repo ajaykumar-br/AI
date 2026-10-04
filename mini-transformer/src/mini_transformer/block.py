@@ -10,14 +10,14 @@ from mini_transformer.layer_norm import LayerNorm
 
 class TransformerBlock(nn.Module):
 
-    def __init__(self, embedding_dim, num_heads, ff_hidden_dim):
+    def __init__(self, embedding_dim, num_heads, ff_hidden_dim, dropout=0.0):
         super().__init__()
 
         self.norm_1 = LayerNorm(embedding_dim)
-        self.attention = MultiHeadAttention(embedding_dim, num_heads)
+        self.attention = MultiHeadAttention(embedding_dim, num_heads, dropout)
 
         self.norm_2 = LayerNorm(embedding_dim)
-        self.feed_forward = FeedForward(embedding_dim, ff_hidden_dim)
+        self.feed_forward = FeedForward(embedding_dim, ff_hidden_dim, dropout)
 
     def forward(self, x):
 

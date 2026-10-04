@@ -53,6 +53,7 @@ input_ids (B, T)
   TransformerBlock × 2 (pre-LayerNorm)
   │   x = x + MultiHeadAttention(LayerNorm(x))   4 heads × 16 dims, causal mask
   │   x = x + FeedForward(LayerNorm(x))          64 → 256 → 64, GELU
+  │   dropout 0.1 on embeddings, attention weights and each sublayer output (training only)
         ↓
   LayerNorm
         ↓
@@ -86,16 +87,19 @@ uv run python scripts/build_corpus.py           # → data/processed/corpus.txt
 uv run python scripts/train_corpus.py
 ```
 
-Settings are at the top of the script: sequence length 32, embedding 64, 4 heads, 2 blocks, batch size 64, 10 epochs, Adam with lr 1e-3. The last 10% of the corpus is held out as a validation set and never trained on. After every epoch the script writes:
-- `checkpoints/tiny_lm_2block_4head.pt`: weights, optimizer state, vocabulary and config
-- `checkpoints/tiny_lm_2block_4head_history.json`: train/val loss and accuracy per epoch
+Settings are at the top of the script: sequence length 32, embedding 64, 4 heads, 2 blocks, dropout 0.1, batch size 64, 10 epochs, Adam with lr 1e-3. The last 10% of the corpus is held out as a validation set and never trained on. The script writes:
+- `checkpoints/tiny_lm_2block_4head_dropout0.1.pt`: weights, optimizer state, vocabulary and config, saved only when validation loss reaches a new best, so it always holds the best epoch (stored as `epoch` and `val_loss` in the checkpoint)
+- `checkpoints/tiny_lm_2block_4head_dropout0.1_history.json`: train/val loss and accuracy, updated every epoch
 
-The file name comes from `num_layers` and `num_heads`, so changing them starts a new file instead of overwriting the last model. The first, attention-only model is kept as `checkpoints/tiny_lm_attention_only.pt`.
+The file name comes from `num_layers`, `num_heads` and `dropout`, so changing them starts a new file instead of overwriting the last model. Earlier models are kept as `checkpoints/tiny_lm_2block_4head.pt` (no dropout) and `checkpoints/tiny_lm_attention_only.pt` (the first, attention-only model).
+
+The training loss and accuracy printed for each epoch are measured with dropout on, so they look worse than the model really is. Validation is measured with dropout off.
 
 ## 3. Plot
 
 ```bash
 uv run python scripts/plot_history.py            # opens a window and saves checkpoints/tiny_lm_2block_4head_history.png
+uv run python scripts/plot_history.py --history checkpoints/tiny_lm_2block_4head_dropout0.1_history.json
 uv run python scripts/plot_history.py --no-show  # save only
 ```
 
@@ -109,7 +113,7 @@ uv run python scripts/evaluate.py --help
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--checkpoint` | `checkpoints/tiny_lm_2block_4head.pt` | Model to load; use `checkpoints/tiny_lm_attention_only.pt` for the first model |
+| `--checkpoint` | `checkpoints/tiny_lm_2block_4head.pt` | Model to load, e.g. `checkpoints/tiny_lm_2block_4head_dropout0.1.pt` or `checkpoints/tiny_lm_attention_only.pt` |
 | `--corpus` | `data/processed/corpus.txt` | Used to rebuild the same validation split |
 | `--examples` | `5` | Number of example next-word predictions to show |
 | `--prompt` | `"today we are going to talk about"` | Starting text for generation |
@@ -140,7 +144,6 @@ The model picks up local phrasing and the transcript style ("um", "you know"), b
 
 The model is two small transformer blocks trained on under a million words. Improvements, roughly in order of impact:
 - more training data
-- dropout, before trying more blocks
 - a subword tokenizer (BPE) instead of word-level
 
 The [`../Transformer`](../Transformer) notebook implements most of these.

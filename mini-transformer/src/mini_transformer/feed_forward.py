@@ -6,7 +6,7 @@ import torch.nn as nn
 
 class FeedForward(nn.Module):
 
-    def __init__(self, embedding_dim, hidden_dim):
+    def __init__(self, embedding_dim, hidden_dim, dropout=0.0):
         super().__init__()
 
         # Expand -> non-linearity -> project back.
@@ -14,7 +14,8 @@ class FeedForward(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(embedding_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, embedding_dim)
+            nn.Linear(hidden_dim, embedding_dim),
+            nn.Dropout(dropout)
         )
 
     def forward(self, x):

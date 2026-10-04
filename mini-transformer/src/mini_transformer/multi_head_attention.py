@@ -9,7 +9,7 @@ from mini_transformer.attention import SelfAttention
 
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, embedding_dim, num_heads):
+    def __init__(self, embedding_dim, num_heads, dropout=0.0):
         super().__init__()
 
         if embedding_dim % num_heads != 0:
@@ -25,12 +25,14 @@ class MultiHeadAttention(nn.Module):
         # Each head is an independent SelfAttention with its own
         # W_Q, W_K, W_V, so each can learn a different pattern.
         self.heads = nn.ModuleList([
-            SelfAttention(embedding_dim, head_dim)
+            SelfAttention(embedding_dim, head_dim, dropout)
             for _ in range(num_heads)
         ])
 
         # W_O: mixes what the heads found back into one vector.
         self.output_projection = nn.Linear(embedding_dim, embedding_dim)
+
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
 
@@ -50,4 +52,4 @@ class MultiHeadAttention(nn.Module):
 
         concatenated = torch.cat(head_outputs, dim=-1)
 
-        return self.output_projection(concatenated)
+        return self.dropout(self.output_projection(concatenated))

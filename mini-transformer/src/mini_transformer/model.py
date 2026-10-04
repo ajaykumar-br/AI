@@ -17,7 +17,8 @@ class TinyLanguageModel(nn.Module):
         sequence_length,
         num_heads,
         num_layers,
-        ff_hidden_dim=None
+        ff_hidden_dim=None,
+        dropout=0.0
     ):
         super().__init__()
 
@@ -34,10 +35,14 @@ class TinyLanguageModel(nn.Module):
             embedding_dim
         )
 
+        # Dropout is only active in model.train() mode.
+        # model.eval() turns it off for validation and generation.
+        self.embedding_dropout = nn.Dropout(dropout)
+
         # num_layers transformer blocks, applied one after another.
         # Each has its own weights.
         self.blocks = nn.ModuleList([
-            TransformerBlock(embedding_dim, num_heads, ff_hidden_dim)
+            TransformerBlock(embedding_dim, num_heads, ff_hidden_dim, dropout)
             for _ in range(num_layers)
         ])
 
@@ -55,7 +60,7 @@ class TinyLanguageModel(nn.Module):
 
         pos_embedding = self.positional_embedding(input_ids)
 
-        x = embedding + pos_embedding
+        x = self.embedding_dropout(embedding + pos_embedding)
 
         # 2. transformer blocks (same shape in and out)
         for block in self.blocks:

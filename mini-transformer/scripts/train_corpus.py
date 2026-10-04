@@ -17,6 +17,7 @@ if __name__ == "__main__":
     embedding_dim = 64
     num_heads = 4
     num_layers = 2
+    dropout = 0.1
     ff_hidden_dim = 4 * embedding_dim
     batch_size = 64
     epochs = 10
@@ -24,6 +25,8 @@ if __name__ == "__main__":
     # The name comes from the settings, so a run with different
     # settings never overwrites an earlier model.
     run_name = f"tiny_lm_{num_layers}block_{num_heads}head"
+    if dropout > 0:
+        run_name += f"_dropout{dropout}"
     save_path = Path(f"checkpoints/{run_name}.pt")
     history_path = Path(f"checkpoints/{run_name}_history.json")
 
@@ -98,7 +101,8 @@ if __name__ == "__main__":
         sequence_length=sequence_length,
         num_heads=num_heads,
         num_layers=num_layers,
-        ff_hidden_dim=ff_hidden_dim
+        ff_hidden_dim=ff_hidden_dim,
+        dropout=dropout
     ).to(device)
     print("logits shape:", model(x.to(device)).shape)
 
@@ -108,6 +112,7 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     history = []
+    best_val_loss = float("inf")
 
     for epoch in range(1, epochs + 1):
         total_loss = 0.0
@@ -158,8 +163,15 @@ if __name__ == "__main__":
         history_path.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
         # --------------------------------------------------------
-        # Save model + vocabulary (overwritten every epoch)
+        # Save model + vocabulary, only when val loss improves
+        # (so an overfitting epoch never replaces a better model)
         # --------------------------------------------------------
+
+        if val_metrics["loss"] >= best_val_loss:
+            print(f"val loss did not improve (best: {best_val_loss:.4f}), model not saved")
+            continue
+
+        best_val_loss = val_metrics["loss"]
 
         torch.save(
             {
@@ -173,11 +185,13 @@ if __name__ == "__main__":
                     "num_heads": num_heads,
                     "num_layers": num_layers,
                     "ff_hidden_dim": ff_hidden_dim,
+                    "dropout": dropout,
                     "sequence_length": sequence_length,
                 },
                 "val_fraction": val_fraction,
                 "epoch": epoch,
+                "val_loss": best_val_loss,
             },
             save_path
         )
-        print("saved model to:", save_path)
+        print(f"val loss improved to {best_val_loss:.4f}, saved model to:", save_path)

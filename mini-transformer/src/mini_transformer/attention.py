@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 class SelfAttention(nn.Module):
 
-    def __init__(self, embedding_dim, head_dim):
+    def __init__(self, embedding_dim, head_dim, dropout=0.0):
         super().__init__()
 
         # TODO
@@ -23,6 +23,10 @@ class SelfAttention(nn.Module):
         self.W_Q = nn.Linear(embedding_dim, head_dim)
         self.W_K = nn.Linear(embedding_dim, head_dim)
         self.W_V = nn.Linear(embedding_dim, head_dim)
+
+        # Randomly drops some attention weights during training,
+        # so a word can't rely on always attending to one other word.
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
 
@@ -77,6 +81,7 @@ class SelfAttention(nn.Module):
         # TODO
         # 5. Softmax over the correct dimension
         attention_weights = F.softmax(masked_attention, dim = -1)
+        attention_weights = self.dropout(attention_weights)
         # print(attention_weights[0])
         # TODO
         # 6. Multiply attention weights by V
