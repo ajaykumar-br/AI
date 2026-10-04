@@ -38,7 +38,7 @@ mini-transformer/
 
 ## Model
 
-Diagrams, a plain-language walkthrough and the parameter breakdown: [TinyLanguageModel, single head](https://claude.ai/artifact/MoBT6fqeKr42wmJW2dK7V8).
+Diagrams, a plain-language walkthrough and the parameter breakdown: [TinyLanguageModel, single head](https://claude.ai/artifact/MoBT6fqeKr42wmJW2dK7V8). The 2-block, 4-head version is on the `mini-transformer-blocks` branch.
 
 ```
 input_ids (B, T)
