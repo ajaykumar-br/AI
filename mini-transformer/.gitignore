@@ -1,4 +1,6 @@
-checkpoints
+checkpoints/**
+!checkpoints/**/.gitkeep
+
 .venv
 __pycache__
 

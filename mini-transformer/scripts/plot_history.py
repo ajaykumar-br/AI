@@ -51,10 +51,14 @@ def plot_series(ax, epochs, values, color, label, fmt):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--history", type=Path, default=Path("checkpoints/history.json"))
-    parser.add_argument("--output", type=Path, default=Path("checkpoints/history.png"))
+    parser.add_argument("--history", type=Path, default=Path("checkpoints/tiny_lm_2block_4head_history.json"))
+    parser.add_argument("--output", type=Path, default=None,
+                        help="defaults to the history file with .png instead of .json")
     parser.add_argument("--no-show", action="store_true", help="only save the PNG")
     args = parser.parse_args()
+
+    if args.output is None:
+        args.output = args.history.with_suffix(".png")
 
     history = json.loads(args.history.read_text(encoding="utf-8"))
     epochs = [h["epoch"] for h in history]

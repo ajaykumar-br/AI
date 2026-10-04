@@ -6,6 +6,8 @@ Usage:
 
     uv run python scripts/evaluate.py
     uv run python scripts/evaluate.py --prompt "the future of ai is" --num-tokens 40
+    uv run python scripts/evaluate.py --seed 0   # repeatable generation
+    uv run python scripts/evaluate.py --checkpoint checkpoints/tiny_lm_attention_only.pt
 """
 
 import argparse
@@ -19,13 +21,23 @@ from mini_transformer.vocabulary import encode, decode
 from mini_transformer.dataset import create_training_data
 from mini_transformer.dataloader import create_dataloader
 from mini_transformer.model import TinyLanguageModel
+from mini_transformer.attention_only_model import AttentionOnlyLanguageModel
 from mini_transformer.evaluation import evaluate
 
 
 def load_model(checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
-    model = TinyLanguageModel(**checkpoint["config"]).to(device)
+    config = checkpoint["config"]
+
+    # The first model (tiny_lm_attention_only.pt) saved head_dim
+    # instead of num_layers / num_heads.
+    if "num_layers" in config:
+        model_class = TinyLanguageModel
+    else:
+        model_class = AttentionOnlyLanguageModel
+
+    model = model_class(**config).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
@@ -76,15 +88,18 @@ def generate(model, prompt, stoi, itos, sequence_length, num_tokens, temperature
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", type=Path, default=Path("checkpoints/tiny_lm.pt"))
+    parser.add_argument("--checkpoint", type=Path, default=Path("checkpoints/tiny_lm_2block_4head.pt"))
     parser.add_argument("--corpus", type=Path, default=Path("data/processed/corpus.txt"))
     parser.add_argument("--examples", type=int, default=5)
     parser.add_argument("--prompt", type=str, default="today we are going to talk about")
     parser.add_argument("--num-tokens", type=int, default=30)
     parser.add_argument("--temperature", type=float, default=0.8)
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Fix the RNG for repeatable generation")
     args = parser.parse_args()
 
-    torch.manual_seed(0)
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --------------------------------------------------------
