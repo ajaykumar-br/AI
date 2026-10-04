@@ -43,6 +43,8 @@ mini-transformer/
 
 ## Model
 
+Diagrams, a plain-language walkthrough and the parameter breakdown: [TinyLanguageModel, 2 blocks × 4 heads](https://claude.ai/artifact/WGhRjf88Mm3ezjf4thVsVR).
+
 ```
 input_ids (B, T)
   ├─ TokenEmbedding       vocab → 64
