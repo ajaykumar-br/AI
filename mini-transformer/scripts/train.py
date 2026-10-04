@@ -17,8 +17,7 @@ if __name__ == "__main__":
 
     sequence_length = 8
     embedding_dim = 32
-    num_heads = 4
-    num_layers = 2
+    head_dim = 32
 
     # --------------------------------------------------------
     # Tokenization
@@ -56,7 +55,7 @@ if __name__ == "__main__":
 
     # TODO
     # Instantiate TinyLanguageModel
-    model = TinyLanguageModel(vocab_size=len(stoi), embedding_dim=embedding_dim, sequence_length=sequence_length, num_heads=num_heads, num_layers=num_layers)
+    model = TinyLanguageModel(vocab_size=len(stoi), embedding_dim=embedding_dim, head_dim=head_dim, sequence_length=sequence_length)
 
     # --------------------------------------------------------
     # Test forward pass

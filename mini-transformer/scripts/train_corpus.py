@@ -15,17 +15,12 @@ if __name__ == "__main__":
     corpus_path = Path("data/processed/corpus.txt")
     sequence_length = 32
     embedding_dim = 64
-    num_heads = 4
-    num_layers = 2
-    ff_hidden_dim = 4 * embedding_dim
+    head_dim = 64
     batch_size = 64
     epochs = 10
     val_fraction = 0.1
-    # The name comes from the settings, so a run with different
-    # settings never overwrites an earlier model.
-    run_name = f"tiny_lm_{num_layers}block_{num_heads}head"
-    save_path = Path(f"checkpoints/{run_name}.pt")
-    history_path = Path(f"checkpoints/{run_name}_history.json")
+    save_path = Path("checkpoints/tiny_lm.pt")
+    history_path = Path("checkpoints/history.json")
 
     torch.manual_seed(42)
 
@@ -95,10 +90,8 @@ if __name__ == "__main__":
     model = TinyLanguageModel(
         vocab_size=len(stoi),
         embedding_dim=embedding_dim,
-        sequence_length=sequence_length,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        ff_hidden_dim=ff_hidden_dim
+        head_dim=head_dim,
+        sequence_length=sequence_length
     ).to(device)
     print("logits shape:", model(x.to(device)).shape)
 
@@ -170,9 +163,7 @@ if __name__ == "__main__":
                 "config": {
                     "vocab_size": len(stoi),
                     "embedding_dim": embedding_dim,
-                    "num_heads": num_heads,
-                    "num_layers": num_layers,
-                    "ff_hidden_dim": ff_hidden_dim,
+                    "head_dim": head_dim,
                     "sequence_length": sequence_length,
                 },
                 "val_fraction": val_fraction,
