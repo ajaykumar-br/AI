@@ -5,6 +5,7 @@ import torch
 
 from mini_transformer.tokenizer import tokenize
 from mini_transformer.vocabulary import build_vocabulary, encode, decode
+from mini_transformer.bpe import BPETokenizer
 from mini_transformer.dataset import create_training_data
 from mini_transformer.dataloader import create_dataloader
 from mini_transformer.model import TinyLanguageModel
@@ -13,18 +14,22 @@ from mini_transformer.evaluation import count_correct, evaluate
 
 if __name__ == "__main__":
     corpus_path = Path("data/processed/corpus.txt")
-    sequence_length = 32
+    tokenizer_type = "bpe"   # "word" or "bpe"
+    bpe_vocab_size = 2048    # 256 bytes + 1792 learned merges
+    sequence_length = 40
     embedding_dim = 64
     num_heads = 4
     num_layers = 2
-    dropout = 0.1
+    dropout = 0.0
     ff_hidden_dim = 4 * embedding_dim
     batch_size = 64
-    epochs = 10
+    epochs = 15
     val_fraction = 0.1
     # The name comes from the settings, so a run with different
     # settings never overwrites an earlier model.
     run_name = f"tiny_lm_{num_layers}block_{num_heads}head"
+    if tokenizer_type == "bpe":
+        run_name += f"_bpe{bpe_vocab_size}"
     if dropout > 0:
         run_name += f"_dropout{dropout}"
     save_path = Path(f"checkpoints/{run_name}.pt")
@@ -35,29 +40,54 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("device:", device)
 
-    # --------------------------------------------------------
-    # corpus -> tokenize -> tokens
-    # --------------------------------------------------------
-
     text = corpus_path.read_text(encoding="utf-8")
-    tokens = tokenize(text)
-    print("tokens:", len(tokens))
-    print("first tokens:", tokens[:10])
 
-    # --------------------------------------------------------
-    # build vocabulary
-    # --------------------------------------------------------
+    if tokenizer_type == "word":
 
-    stoi, itos = build_vocabulary(tokens)
-    print("vocab size:", len(stoi))
+        # --------------------------------------------------------
+        # corpus -> tokenize -> tokens -> vocabulary -> token IDs
+        # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # encode -> token IDs
-    # --------------------------------------------------------
+        tokens = tokenize(text)
+        print("tokens:", len(tokens))
+        print("first tokens:", tokens[:10])
 
-    token_ids = encode(tokens, stoi)
+        stoi, itos = build_vocabulary(tokens)
+        vocab_size = len(stoi)
+        token_ids = encode(tokens, stoi)
+
+        # IDs -> list of token strings, for printing
+        def token_strings(ids):
+            return decode(ids, itos)
+
+        tokenizer_state = {"stoi": stoi, "itos": itos}
+
+    elif tokenizer_type == "bpe":
+
+        # --------------------------------------------------------
+        # corpus -> learn BPE merges -> token IDs
+        # (lowercased, like the word-level tokenizer, so the only
+        # thing that changes is how words are split)
+        # --------------------------------------------------------
+
+        text = text.lower()
+        bpe = BPETokenizer()
+        print(f"learning {bpe_vocab_size - 256} BPE merges...")
+        bpe.train(text, bpe_vocab_size, verbose=True)
+
+        vocab_size = bpe.vocab_size
+        token_ids = bpe.encode(text)
+        token_strings = bpe.token_strings
+
+        tokenizer_state = {"merges": bpe.merges}
+
+    else:
+        raise ValueError(f"unknown tokenizer_type: {tokenizer_type!r}")
+
+    print("tokenizer:", tokenizer_type, "| vocab size:", vocab_size)
+    print("token IDs:", len(token_ids))
     print("first token IDs:", token_ids[:10])
-    print("decoded:", decode(token_ids[:10], itos))
+    print("decoded:", token_strings(token_ids[:10]))
 
     # --------------------------------------------------------
     # train / validation split
@@ -88,15 +118,15 @@ if __name__ == "__main__":
     x, y = next(iter(loader))
     print("batch input shape:", x.shape)
     print("batch target shape:", y.shape)
-    print("input  :", " ".join(decode(x[0, :8].tolist(), itos)))
-    print("target :", " ".join(decode(y[0, :8].tolist(), itos)))
+    print("input  :", token_strings(x[0, :8].tolist()))
+    print("target :", token_strings(y[0, :8].tolist()))
 
     # --------------------------------------------------------
     # TinyLanguageModel -> logits
     # --------------------------------------------------------
 
     model = TinyLanguageModel(
-        vocab_size=len(stoi),
+        vocab_size=vocab_size,
         embedding_dim=embedding_dim,
         sequence_length=sequence_length,
         num_heads=num_heads,
@@ -163,7 +193,7 @@ if __name__ == "__main__":
         history_path.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
         # --------------------------------------------------------
-        # Save model + vocabulary, only when val loss improves
+        # Save model + tokenizer, only when val loss improves
         # (so an overfitting epoch never replaces a better model)
         # --------------------------------------------------------
 
@@ -177,10 +207,11 @@ if __name__ == "__main__":
             {
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "stoi": stoi,
-                "itos": itos,
+                # word: "stoi" + "itos" | bpe: "merges"
+                "tokenizer": tokenizer_type,
+                **tokenizer_state,
                 "config": {
-                    "vocab_size": len(stoi),
+                    "vocab_size": vocab_size,
                     "embedding_dim": embedding_dim,
                     "num_heads": num_heads,
                     "num_layers": num_layers,

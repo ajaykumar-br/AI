@@ -8,9 +8,11 @@ Usage:
     uv run python scripts/evaluate.py --prompt "the future of ai is" --num-tokens 40
     uv run python scripts/evaluate.py --seed 0   # repeatable generation
     uv run python scripts/evaluate.py --checkpoint checkpoints/tiny_lm_attention_only.pt
+    uv run python scripts/evaluate.py --checkpoint checkpoints/tiny_lm_2block_4head_bpe2048.pt
 """
 
 import argparse
+import math
 from collections import Counter
 from pathlib import Path
 
@@ -18,6 +20,7 @@ import torch
 
 from mini_transformer.tokenizer import tokenize
 from mini_transformer.vocabulary import encode, decode
+from mini_transformer.bpe import BPETokenizer
 from mini_transformer.dataset import create_training_data
 from mini_transformer.dataloader import create_dataloader
 from mini_transformer.model import TinyLanguageModel
@@ -44,11 +47,54 @@ def load_model(checkpoint_path, device):
     return model, checkpoint
 
 
-@torch.no_grad()
-def show_predictions(model, input_ids, target_ids, itos, device, num_examples, top_k=5):
+class WordTokenizer:
     """
-    For a few validation windows, show the last context words, the true
-    next word, and the model's top-k guesses.
+    The original word-level tokenizer, with the same methods as BPETokenizer.
+    """
+
+    def __init__(self, stoi, itos):
+        self.stoi = stoi
+        self.itos = itos
+        self.vocab_size = len(stoi)
+
+    def encode(self, text):
+        return encode(tokenize(text), self.stoi)
+
+    def decode(self, token_ids):
+        return " ".join(decode(token_ids, self.itos))
+
+    def token_strings(self, token_ids):
+        return decode(token_ids, self.itos)
+
+
+class LowercaseBPETokenizer(BPETokenizer):
+    """
+    BPE was trained on lowercased text, so lowercase here too
+    (the word-level tokenize() already does this).
+    """
+
+    def encode(self, text):
+        return super().encode(text.lower())
+
+
+def load_tokenizer(checkpoint):
+    # Checkpoints from before BPE have no "tokenizer" key: they are word-level.
+    tokenizer_type = checkpoint.get("tokenizer", "word")
+
+    if tokenizer_type == "word":
+        return tokenizer_type, WordTokenizer(checkpoint["stoi"], checkpoint["itos"])
+
+    if tokenizer_type == "bpe":
+        return tokenizer_type, LowercaseBPETokenizer(checkpoint["merges"])
+
+    raise ValueError(f"unknown tokenizer in checkpoint: {tokenizer_type!r}")
+
+
+@torch.no_grad()
+def show_predictions(model, input_ids, target_ids, tokenizer, device, num_examples, top_k=5):
+    """
+    For a few validation windows, show the last context tokens, the true
+    next token, and the model's top-k guesses.
     """
 
     indices = torch.linspace(0, len(input_ids) - 1, num_examples).long()
@@ -59,11 +105,11 @@ def show_predictions(model, input_ids, target_ids, itos, device, num_examples, t
         probs = torch.softmax(logits, dim=-1)
         top = probs.topk(top_k)
 
-        context = " ".join(decode(input_ids[i, -10:].tolist(), itos))
-        actual = itos[target_ids[i, -1].item()]
+        context = tokenizer.decode(input_ids[i, -12:].tolist())
+        actual = tokenizer.token_strings([target_ids[i, -1].item()])[0]
         guesses = ", ".join(
-            f"{itos[idx.item()]} ({p.item():.0%})"
-            for p, idx in zip(top.values, top.indices)
+            f"{token!r} ({p.item():.0%})"
+            for p, token in zip(top.values, tokenizer.token_strings(top.indices.tolist()))
         )
         mark = "[correct]" if top.indices[0].item() == target_ids[i, -1].item() else "[wrong]"
 
@@ -73,8 +119,8 @@ def show_predictions(model, input_ids, target_ids, itos, device, num_examples, t
 
 
 @torch.no_grad()
-def generate(model, prompt, stoi, itos, sequence_length, num_tokens, temperature, device):
-    token_ids = encode(tokenize(prompt), stoi)
+def generate(model, prompt, tokenizer, sequence_length, num_tokens, temperature, device):
+    token_ids = tokenizer.encode(prompt)
 
     for _ in range(num_tokens):
         context = torch.tensor([token_ids[-sequence_length:]], dtype=torch.long, device=device)
@@ -83,7 +129,7 @@ def generate(model, prompt, stoi, itos, sequence_length, num_tokens, temperature
         next_id = torch.multinomial(probs, num_samples=1).item()
         token_ids.append(next_id)
 
-    return " ".join(decode(token_ids, itos))
+    return tokenizer.decode(token_ids)
 
 
 if __name__ == "__main__":
@@ -103,16 +149,17 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --------------------------------------------------------
-    # Load model + vocabulary
+    # Load model + tokenizer
     # --------------------------------------------------------
 
     model, checkpoint = load_model(args.checkpoint, device)
-    stoi, itos = checkpoint["stoi"], checkpoint["itos"]
+    tokenizer_type, tokenizer = load_tokenizer(checkpoint)
     config = checkpoint["config"]
     sequence_length = config["sequence_length"]
     val_fraction = checkpoint.get("val_fraction")
 
     print("checkpoint:", args.checkpoint, "| epoch:", checkpoint["epoch"], "| device:", device)
+    print("tokenizer:", tokenizer_type, "| vocab size:", f"{tokenizer.vocab_size:,}")
     print("config:", config)
     print("parameters:", f"{sum(p.numel() for p in model.parameters()):,}")
 
@@ -120,8 +167,7 @@ if __name__ == "__main__":
     # Rebuild the same validation split used in training
     # --------------------------------------------------------
 
-    tokens = tokenize(args.corpus.read_text(encoding="utf-8"))
-    token_ids = encode(tokens, stoi)
+    token_ids = tokenizer.encode(args.corpus.read_text(encoding="utf-8"))
 
     if val_fraction is None:
         print("\nWARNING: checkpoint has no val_fraction - evaluating on the full corpus,"
@@ -143,30 +189,43 @@ if __name__ == "__main__":
 
     metrics = evaluate(model, val_loader, device)
 
-    # Baselines: random guessing, and always predicting the most common training word
+    # Per-token loss can't be compared across tokenizers: a BPE token is
+    # often part of a word. Spread the total loss over the number of words
+    # (as the word-level tokenizer splits them) to get a fair number.
+    # For word-level checkpoints this is the same as the per-token loss.
+    val_words = len(tokenize(tokenizer.decode(val_token_ids)))
+    loss_per_word = metrics["loss"] * len(val_token_ids) / val_words
+
+    # Baselines: random guessing, and always predicting the most common training token
     most_common_id, _ = Counter(train_token_ids or token_ids).most_common(1)[0]
+    most_common_token = tokenizer.token_strings([most_common_id])[0]
     baseline_accuracy = sum(t == most_common_id for t in val_token_ids[1:]) / (len(val_token_ids) - 1)
 
-    print("\n=== Validation metrics ===")
+    print("\n=== Validation metrics (per token) ===")
     print(f"  loss            : {metrics['loss']:.4f}")
     print(f"  perplexity      : {metrics['perplexity']:.2f}")
     print(f"  top-1 accuracy  : {metrics['accuracy']:.2%}")
     print(f"  top-5 accuracy  : {metrics['top_5_accuracy']:.2%}")
 
+    print("\n=== Validation metrics (per word, comparable across tokenizers) ===")
+    print(f"  tokens per word : {len(val_token_ids) / val_words:.3f}")
+    print(f"  loss per word   : {loss_per_word:.4f}")
+    print(f"  word perplexity : {math.exp(loss_per_word):.2f}")
+
     print("\n=== Baselines ===")
-    print(f"  random guess perplexity          : {len(stoi):,}")
-    print(f"  always '{itos[most_common_id]}' accuracy : {baseline_accuracy:.2%}")
+    print(f"  random guess perplexity          : {tokenizer.vocab_size:,}")
+    print(f"  always {most_common_token!r} accuracy : {baseline_accuracy:.2%}")
 
     # --------------------------------------------------------
     # Example predictions
     # --------------------------------------------------------
 
-    print("\n=== Example next-word predictions (validation text) ===")
+    print("\n=== Example next-token predictions (validation text) ===")
     show_predictions(
         model,
         torch.as_tensor(val_input_ids),
         torch.as_tensor(val_target_ids),
-        itos, device, args.examples
+        tokenizer, device, args.examples
     )
 
     # --------------------------------------------------------
@@ -175,6 +234,6 @@ if __name__ == "__main__":
 
     print(f"\n=== Generated text (temperature {args.temperature}) ===")
     print(" ", generate(
-        model, args.prompt, stoi, itos, sequence_length,
+        model, args.prompt, tokenizer, sequence_length,
         args.num_tokens, args.temperature, device
     ))
